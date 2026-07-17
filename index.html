@@ -52,6 +52,19 @@
     transform: scale(1.05);
   }
 
+  /* กรอบโฟกัสสีเหลือง สำหรับรีโมท Android TV / คีย์บอร์ด */
+  .thumbnail:focus {
+    outline: 4px solid #ffdd00;
+    outline-offset: 2px;
+    transform: scale(1.08);
+    z-index: 2;
+  }
+
+  /* เอาไฮไลท์สีฟ้าเริ่มต้นของ Chrome/Android ออก จะได้ไม่ทับกับกรอบเหลือง */
+  .thumbnail {
+    -webkit-tap-highlight-color: transparent;
+  }
+
   /* ปุ่มควบคุมด้านล่าง */
   #controls {
     display: flex;
@@ -350,18 +363,42 @@ if (thumbnail && videoTitle) {
   
 let currentSrc = '';
 
+function playThumbnail(thumb) {
+  const src = thumb.getAttribute('data-src');
+  currentSrc = src;
+  if (Hls.isSupported()) {
+    const hls = new Hls();
+    hls.loadSource(src);
+    hls.attachMedia(video);
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = src;
+  }
+  video.play();
+}
+
 thumbnails.forEach(thumb => {
+  // ทำให้การ์ดหนังรับโฟกัสได้ (จำเป็นสำหรับรีโมท Android TV)
+  if (!thumb.hasAttribute('tabindex')) {
+    thumb.setAttribute('tabindex', '0');
+  }
+  // ทำให้ตัวอ่านหน้าจอ/ผู้ใช้เข้าใจว่าเป็นปุ่มกดได้
+  thumb.setAttribute('role', 'button');
+
   thumb.addEventListener('click', () => {
-    const src = thumb.getAttribute('data-src');
-    currentSrc = src;
-    if (Hls.isSupported()) {
-      const hls = new Hls();
-      hls.loadSource(src);
-      hls.attachMedia(video);
-    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      video.src = src;
+    playThumbnail(thumb);
+  });
+
+  // รองรับปุ่ม OK/Enter ของรีโมท และปุ่ม Space บนคีย์บอร์ด
+  thumb.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      playThumbnail(thumb);
     }
-    video.play();
+  });
+
+  // เลื่อนแถบ thumbnails ให้เห็นการ์ดที่กำลังโฟกัสอยู่เสมอ
+  thumb.addEventListener('focus', () => {
+    thumb.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
   });
 });
 
