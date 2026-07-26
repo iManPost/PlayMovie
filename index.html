@@ -92,6 +92,48 @@
   button:hover {
     background-color: #555;
   }
+
+  /* =================================================================
+     โหมดเต็มจอสำรอง (pseudo-fullscreen)
+     ใช้ตอนอุปกรณ์/เบราว์เซอร์ไม่รองรับ Fullscreen API มาตรฐาน (พบบ่อยใน
+     กล่อง Android TV บางรุ่น) โดยขยาย video ให้เต็มจอด้วย CSS เอง
+     แทนที่จะพึ่งพา document.fullscreenElement เพียงอย่างเดียว
+  ================================================================= */
+  body.app-fullscreen {
+    padding: 0;
+    overflow: hidden;
+  }
+
+  body.app-fullscreen h1,
+  body.app-fullscreen .thumbnails {
+    display: none;
+  }
+
+  body.app-fullscreen .video-section {
+    position: fixed;
+    inset: 0;
+    margin: 0;
+    z-index: 1000;
+    background: #000;
+    align-items: center;
+  }
+
+  body.app-fullscreen video {
+    width: 100vw;
+    height: 100vh;
+    max-width: none;
+    border-radius: 0;
+    object-fit: contain;
+  }
+
+  body.app-fullscreen #controls {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 20px;
+    z-index: 1001;
+    margin-top: 0;
+  }
 </style>
 </head>
 <!-- ใส่โค้ดนี้ไว้ก่อนปิดแท็ก </body> -->
@@ -156,8 +198,6 @@
 
     <!-- ตัวอย่างหนังเรื่องแรก-----https://allinhd.com/-->
     <!-- ตัวอย่างหนังเรื่องแรก-----https://www.24hd.net/----https://dunung24.com/---->
-                 <img src="https://madaboutmoviez.com/wp-content/uploads/%E0%B8%84%E0%B8%99%E0%B9%80%E0%B8%94%E0%B8%B7%E0%B8%AD%E0%B8%94%E0%B8%97%E0%B8%A7%E0%B8%87%E0%B9%81%E0%B8%84%E0%B9%89%E0%B8%99-The-Debt-Collector.jpg" 
-       alt="คนเดือทวงแค้น" class="thumbnail" data-src="https://media.vdohls.com/81gFK_p-Cx6sR/video.m3u8" />
                <img src="https://f.ptcdn.info/757/091/000/tief8h1mambvEnX3VVCJu-o.jpg" 
        alt="มหากาพย์โอดิสซี" class="thumbnail" data-src="https://media.vdohls.com/LR_9odfBl1-PG/video.m3u8" />
              <img src="https://9.9nung.com/wp-content/uploads/2026/07/kFIs85TGQrrUqOvyYuC1ezkRO8x-185x278.jpg" 
@@ -375,10 +415,40 @@ if (thumbnail && videoTitle) {
 let currentSrc = '';
 let hlsInstance = null; // เก็บ instance เดียวไว้ ป้องกันการสร้างซ้ำซ้อนจนวิดีโอหลุด/เด้งออกจากเต็มจอ
 
-function playThumbnail(thumb) {
-  // จำไว้ว่ากำลังเต็มจออยู่หรือไม่ ก่อนเริ่มโหลดไฟล์ใหม่
-  const wasFullscreen = !!document.fullscreenElement;
+/* ===================================================================
+   ฟังก์ชันช่วยจัดการเต็มจอแบบรองรับหลายเบราว์เซอร์/กล่องแอนดรอยด์ทีวี
+   บางตัว (WebView เก่าๆ) ไม่รองรับ document.fullscreenElement / 
+   element.requestFullscreen() มาตรฐาน ต้องใช้ชื่อแบบ webkit/moz/ms
+   หรือ webkitEnterFullscreen (โหมดเต็มจอในตัวของ <video> เอง)
+=================================================================== */
+function getFullscreenElement() {
+  return document.fullscreenElement ||
+         document.webkitFullscreenElement ||
+         document.mozFullScreenElement ||
+         document.msFullscreenElement ||
+         null;
+}
 
+function requestFS(el) {
+  if (el.requestFullscreen) return el.requestFullscreen();
+  if (el.webkitRequestFullscreen) return el.webkitRequestFullscreen();
+  if (el.mozRequestFullScreen) return el.mozRequestFullScreen();
+  if (el.msRequestFullscreen) return el.msRequestFullscreen();
+  // บางกล่อง/เบราว์เซอร์ (เช่น WebView บางรุ่น) ไม่รองรับ Fullscreen API เลย
+  // แต่ <video> เองมีโหมดเต็มจอในตัว ใช้อันนี้แทนได้
+  if (el.webkitEnterFullscreen) return el.webkitEnterFullscreen();
+  return Promise.reject(new Error('อุปกรณ์นี้ไม่รองรับ Fullscreen API'));
+}
+
+function exitFS() {
+  if (document.exitFullscreen) return document.exitFullscreen();
+  if (document.webkitExitFullscreen) return document.webkitExitFullscreen();
+  if (document.webkitCancelFullScreen) return document.webkitCancelFullScreen();
+  if (document.mozCancelFullScreen) return document.mozCancelFullScreen();
+  if (document.msExitFullscreen) return document.msExitFullscreen();
+}
+
+function playThumbnail(thumb) {
   const src = thumb.getAttribute('data-src');
   currentSrc = src;
 
@@ -419,9 +489,11 @@ function playThumbnail(thumb) {
 
   video.play().catch(() => {});
 
-  // ถ้าก่อนหน้านี้อยู่ในโหมดเต็มจอ ให้คงเต็มจอไว้ต่อ (กันเคสหลุดเต็มจอตอนเปลี่ยนเรื่อง)
-  if (wasFullscreen && !document.fullscreenElement) {
-    video.requestFullscreen().catch(() => {});
+  // ถ้ากำลังอยู่ในโหมดเต็มจอ (pseudo-fullscreen ของเรา) อยู่แล้ว
+  // class "app-fullscreen" ยังติดอยู่ที่ body เหมือนเดิมอัตโนมัติ
+  // แค่ลองขอเต็มจอแบบเบราว์เซอร์จริงซ้ำเผื่อหลุดตอนเปลี่ยนวิดีโอ
+  if (appFullscreen && !getFullscreenElement()) {
+    requestFS(video).catch(() => {});
   }
 }
 
@@ -524,13 +596,34 @@ document.getElementById('muteBtn').addEventListener('click', () => {
 
 
 // ปุ่มเปิด/เต็มจอ
+// หมายเหตุ: บางกล่อง Android TV ไม่รองรับ Fullscreen API มาตรฐานเลย
+// (requestFullscreen ไม่มีผล/ไม่ throw error แต่ก็ไม่เต็มจอ) จึงใช้
+// class "app-fullscreen" บน body เป็นตัวคุมเต็มจอหลัก (CSS fallback)
+// ควบคู่ไปกับการลองเรียก Fullscreen API จริงด้วยเผื่ออุปกรณ์รองรับ
+let appFullscreen = false;
+
+function enterAppFullscreen() {
+  appFullscreen = true;
+  document.body.classList.add('app-fullscreen');
+  requestFS(video).catch(() => {}); // ลองเต็มจอแบบเบราว์เซอร์จริงด้วย ถ้าไม่รองรับก็ไม่เป็นไร
+  showControls();
+}
+
+function exitAppFullscreen() {
+  appFullscreen = false;
+  document.body.classList.remove('app-fullscreen');
+  if (getFullscreenElement()) {
+    exitFS();
+  }
+  clearTimeout(hideControlsTimer);
+  controlsEl.classList.remove('controls-hidden');
+}
+
 document.getElementById('fullscreenBtn').addEventListener('click', () => {
-  if (!document.fullscreenElement) {
-    video.requestFullscreen().catch(err => {
-      console.error(`Error entering fullscreen: ${err.message}`);
-    });
+  if (!appFullscreen) {
+    enterAppFullscreen();
   } else {
-    document.exitFullscreen();
+    exitAppFullscreen();
   }
 });
 
@@ -538,6 +631,8 @@ document.getElementById('fullscreenBtn').addEventListener('click', () => {
    ซ่อน/แสดงปุ่มควบคุมอัตโนมัติตอนเต็มจอ (3 วินาทีไม่มีการกดจะซ่อน)
    หมายเหตุ: ใช้ opacity ไม่ใช่ display:none จึงยังกดรีโมท/คีย์บอร์ด
    เลือกโฟกัสปุ่มต่างๆ (รวมถึงปุ่มเต็มจอ) ได้ตามปกติแม้ตอนซ่อนอยู่
+   ผูกกับตัวแปร appFullscreen (ไม่ใช่ document.fullscreenElement อย่างเดียว)
+   เพื่อให้ทำงานได้แม้อุปกรณ์ไม่รองรับ Fullscreen API มาตรฐาน
 =================================================================== */
 const controlsEl = document.getElementById('controls');
 let hideControlsTimer = null;
@@ -545,7 +640,7 @@ let hideControlsTimer = null;
 function showControls() {
   controlsEl.classList.remove('controls-hidden');
   clearTimeout(hideControlsTimer);
-  if (document.fullscreenElement) {
+  if (appFullscreen) {
     hideControlsTimer = setTimeout(() => {
       controlsEl.classList.add('controls-hidden');
     }, 3000);
@@ -557,14 +652,15 @@ document.addEventListener('keydown', showControls);
 document.addEventListener('mousemove', showControls);
 document.addEventListener('touchstart', showControls);
 
-document.addEventListener('fullscreenchange', () => {
-  if (document.fullscreenElement) {
-    showControls(); // เข้าเต็มจอ -> เริ่มนับถอยหลังซ่อนปุ่ม
-  } else {
-    clearTimeout(hideControlsTimer);
-    controlsEl.classList.remove('controls-hidden'); // ออกจากเต็มจอ -> โชว์ปุ่มตลอด
-  }
-});
+// ถ้าออกจากเต็มจอโดยวิธีอื่น (เช่น กดปุ่ม back ของรีโมท/ทีวี ที่ยกเลิก
+// เต็มจอแบบเบราว์เซอร์จริง) ให้ซิงค์สถานะ appFullscreen กลับมาด้วย
+['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange']
+  .forEach(evt => document.addEventListener(evt, () => {
+    if (!getFullscreenElement() && appFullscreen) {
+      // เบราว์เซอร์ยกเลิกเต็มจอเอง แต่เรายังอยู่ในโหมด pseudo-fullscreen ของเราต่อได้
+      // (ไม่บังคับออกจาก app-fullscreen เพราะ CSS fallback ยังทำงานได้โดยไม่พึ่ง API นี้)
+    }
+  }));
 
 // ปุ่มย้อนกลับไป 10 วินาที (Rewind)
 document.getElementById('rewindBtn').addEventListener('click', () => {
