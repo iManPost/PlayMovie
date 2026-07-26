@@ -70,6 +70,13 @@
     display: flex;
     justify-content: center;
     margin-top: 10px;
+    transition: opacity 0.4s ease;
+    opacity: 1;
+  }
+
+  /* ซ่อนปุ่มควบคุมตอนเต็มจอ (ยังกดรีโมทได้ตามปกติ เพราะแค่ทำให้โปร่งใส ไม่ได้ปิดการรับ input) */
+  #controls.controls-hidden {
+    opacity: 0;
   }
 
   button {
@@ -149,6 +156,8 @@
 
     <!-- ตัวอย่างหนังเรื่องแรก-----https://allinhd.com/-->
     <!-- ตัวอย่างหนังเรื่องแรก-----https://www.24hd.net/----https://dunung24.com/---->
+                 <img src="https://madaboutmoviez.com/wp-content/uploads/%E0%B8%84%E0%B8%99%E0%B9%80%E0%B8%94%E0%B8%B7%E0%B8%AD%E0%B8%94%E0%B8%97%E0%B8%A7%E0%B8%87%E0%B9%81%E0%B8%84%E0%B9%89%E0%B8%99-The-Debt-Collector.jpg" 
+       alt="คนเดือทวงแค้น" class="thumbnail" data-src="https://enjoy24cdn.com/hlsr2/58bcecaf0dec0200a7ea01e2e7efe05b/master.m3u8" />
                <img src="https://f.ptcdn.info/757/091/000/tief8h1mambvEnX3VVCJu-o.jpg" 
        alt="มหากาพย์โอดิสซี" class="thumbnail" data-src="https://media.vdohls.com/LR_9odfBl1-PG/video.m3u8" />
              <img src="https://9.9nung.com/wp-content/uploads/2026/07/kFIs85TGQrrUqOvyYuC1ezkRO8x-185x278.jpg" 
@@ -364,18 +373,56 @@ if (thumbnail && videoTitle) {
     
   
 let currentSrc = '';
+let hlsInstance = null; // เก็บ instance เดียวไว้ ป้องกันการสร้างซ้ำซ้อนจนวิดีโอหลุด/เด้งออกจากเต็มจอ
 
 function playThumbnail(thumb) {
+  // จำไว้ว่ากำลังเต็มจออยู่หรือไม่ ก่อนเริ่มโหลดไฟล์ใหม่
+  const wasFullscreen = !!document.fullscreenElement;
+
   const src = thumb.getAttribute('data-src');
   currentSrc = src;
+
+  // ทำลาย instance เดิมก่อนเสมอ ไม่ให้มีหลาย instance แย่งกันควบคุม video
+  // (สาเหตุหลักที่เล่นไปสักพักแล้วเด้งออกจากเต็มจอ/ค้าง)
+  if (hlsInstance) {
+    hlsInstance.destroy();
+    hlsInstance = null;
+  }
+
   if (Hls.isSupported()) {
-    const hls = new Hls();
-    hls.loadSource(src);
-    hls.attachMedia(video);
+    hlsInstance = new Hls();
+    hlsInstance.loadSource(src);
+    hlsInstance.attachMedia(video);
+
+    // ดักจับ error แล้วพยายามกู้คืนแทนที่จะปล่อยให้วิดีโอหยุด/รีเซ็ต
+    // (การที่วิดีโอหยุดกะทันหันจาก error บางทีทำให้ระบบเบราว์เซอร์ยกเลิกเต็มจอไปด้วย)
+    hlsInstance.on(Hls.Events.ERROR, function (event, data) {
+      if (!data.fatal) return;
+      switch (data.type) {
+        case Hls.ErrorTypes.NETWORK_ERROR:
+          hlsInstance.startLoad();
+          break;
+        case Hls.ErrorTypes.MEDIA_ERROR:
+          hlsInstance.recoverMediaError();
+          break;
+        default:
+          hlsInstance.destroy();
+          hlsInstance = new Hls();
+          hlsInstance.loadSource(src);
+          hlsInstance.attachMedia(video);
+          break;
+      }
+    });
   } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
     video.src = src;
   }
-  video.play();
+
+  video.play().catch(() => {});
+
+  // ถ้าก่อนหน้านี้อยู่ในโหมดเต็มจอ ให้คงเต็มจอไว้ต่อ (กันเคสหลุดเต็มจอตอนเปลี่ยนเรื่อง)
+  if (wasFullscreen && !document.fullscreenElement) {
+    video.requestFullscreen().catch(() => {});
+  }
 }
 
 thumbnails.forEach(thumb => {
@@ -484,6 +531,38 @@ document.getElementById('fullscreenBtn').addEventListener('click', () => {
     });
   } else {
     document.exitFullscreen();
+  }
+});
+
+/* ===================================================================
+   ซ่อน/แสดงปุ่มควบคุมอัตโนมัติตอนเต็มจอ (3 วินาทีไม่มีการกดจะซ่อน)
+   หมายเหตุ: ใช้ opacity ไม่ใช่ display:none จึงยังกดรีโมท/คีย์บอร์ด
+   เลือกโฟกัสปุ่มต่างๆ (รวมถึงปุ่มเต็มจอ) ได้ตามปกติแม้ตอนซ่อนอยู่
+=================================================================== */
+const controlsEl = document.getElementById('controls');
+let hideControlsTimer = null;
+
+function showControls() {
+  controlsEl.classList.remove('controls-hidden');
+  clearTimeout(hideControlsTimer);
+  if (document.fullscreenElement) {
+    hideControlsTimer = setTimeout(() => {
+      controlsEl.classList.add('controls-hidden');
+    }, 3000);
+  }
+}
+
+// ทุกครั้งที่มีการกดปุ่ม/รีโมท (ลูกศร, Enter ฯลฯ) หรือขยับเมาส์/แตะจอ ให้โชว์ปุ่มอีกครั้ง
+document.addEventListener('keydown', showControls);
+document.addEventListener('mousemove', showControls);
+document.addEventListener('touchstart', showControls);
+
+document.addEventListener('fullscreenchange', () => {
+  if (document.fullscreenElement) {
+    showControls(); // เข้าเต็มจอ -> เริ่มนับถอยหลังซ่อนปุ่ม
+  } else {
+    clearTimeout(hideControlsTimer);
+    controlsEl.classList.remove('controls-hidden'); // ออกจากเต็มจอ -> โชว์ปุ่มตลอด
   }
 });
 
