@@ -181,7 +181,7 @@
   
 <body>
 
-<h1>🎬ดูหนัง - DEPLAY🍿 รีโมท ↑↓←→ Remote กด CH</b> เลื่อนขึ้น กด OK เลือกหนัง</h1>
+<h1>🎬ดูหนัง - DEPLAY🍿 รีโมท ↑↓←→ Remote กด CH เลื่อนขึ้น กด OK เลือกหนัง</h1>
 
 <div class="video-section">
   <video id="video" controls></video>
@@ -192,7 +192,6 @@
  <button id="fullscreenBtn">เปิด/เต็มจอ</button>
 <button id="rewindBtn">ย้อนกลับ</button>
 <button id="forwardBtn">ไปข้างหน้า</button>  
-</div>
 </div>
 <div class="thumbnails">
 
@@ -396,14 +395,10 @@
         
 
 </div>
-</div>
   
   <!-- เพิ่มหนังเรื่องอื่นๆ ได้ตามต้องการ -->
-</div>
 
-
-
-<script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
 <script>
 const video = document.getElementById('video');
 const playBtn = document.getElementById('playBtn');
@@ -421,6 +416,15 @@ if (thumbnail && videoTitle) {
   
 let currentSrc = '';
 let hlsInstance = null; // เก็บ instance เดียวไว้ ป้องกันการสร้างซ้ำซ้อนจนวิดีโอหลุด/เด้งออกจากเต็มจอ
+
+// ดัก error ที่ไม่คาดคิดไว้เฉยๆ (ไม่ throw ต่อ) เผื่อบางอุปกรณ์ไม่รองรับ API บางตัว
+// จะได้ไม่ทำให้โค้ดส่วนที่เหลือด้านล่าง (เช่น การผูกปุ่มต่างๆ) หยุดทำงานไปด้วย
+window.addEventListener('error', function (e) {
+  console.warn('เกิดข้อผิดพลาดที่ไม่คาดคิด:', e.message);
+});
+window.addEventListener('unhandledrejection', function (e) {
+  console.warn('เกิด Promise error ที่ไม่คาดคิด:', e.reason);
+});
 
 /* ===================================================================
    ฟังก์ชันช่วยจัดการเต็มจอแบบรองรับหลายเบราว์เซอร์/กล่องแอนดรอยด์ทีวี
@@ -441,10 +445,13 @@ function requestFS(el) {
   if (el.webkitRequestFullscreen) return el.webkitRequestFullscreen();
   if (el.mozRequestFullScreen) return el.mozRequestFullScreen();
   if (el.msRequestFullscreen) return el.msRequestFullscreen();
-  // บางกล่อง/เบราว์เซอร์ (เช่น WebView บางรุ่น) ไม่รองรับ Fullscreen API เลย
-  // แต่ <video> เองมีโหมดเต็มจอในตัว ใช้อันนี้แทนได้
-  if (el.webkitEnterFullscreen) return el.webkitEnterFullscreen();
-  return Promise.reject(new Error('อุปกรณ์นี้ไม่รองรับ Fullscreen API'));
+  // หมายเหตุ: เดิมมี fallback ไปที่ el.webkitEnterFullscreen() ซึ่งเป็นโหมดเต็มจอ
+  // "ในตัว" ของแท็ก <video> เอง — บนหลายกล่อง Android TV / WebView รุ่นเก่า การเรียก
+  // เมธอดนี้จะโยนการเล่นวิดีโอออกไปให้ตัวเล่นวิดีโอระดับ OS (นอก WebView) ควบคุมแทน
+  // ถ้าตัวเล่นนั้นเจอปัญหา (บัฟเฟอร์/โคเดก) มันมักจะปิดตัวเองและพา WebView/แอปที่ครอบอยู่
+  // เด้งกลับไปหน้าโฮมของกล่องไปด้วย ซึ่งตรงกับอาการที่เจอ จึงตัดออก แล้วปล่อยให้ตกไปใช้
+  // โหมดเต็มจอจำลองด้วย CSS (class "app-fullscreen") ที่ปลอดภัยกว่าแทน
+  return Promise.reject(new Error('อุปกรณ์นี้ไม่รองรับ Fullscreen API มาตรฐาน จะใช้โหมดเต็มจอจำลองแทน'));
 }
 
 function exitFS() {
@@ -453,6 +460,48 @@ function exitFS() {
   if (document.webkitCancelFullScreen) return document.webkitCancelFullScreen();
   if (document.mozCancelFullScreen) return document.mozCancelFullScreen();
   if (document.msExitFullscreen) return document.msExitFullscreen();
+}
+
+// ตั้งค่า hls.js แบบประหยัดหน่วยความจำ สำหรับกล่องแอนดรอยด์ทีวี/กล่องทัวร์สเปกต่ำ
+// (ค่า default ของ hls.js อาจปล่อยให้บัฟเฟอร์บวมจนแรมกล่องไม่พอ แล้ว OS สั่งฆ่า
+// โปรเซส WebView ทิ้ง ทำให้แอปที่ครอบเว็บนี้อยู่เด้งกลับไปหน้าโฮมของกล่องหลังเล่นได้สักพัก)
+const hlsConfig = {
+  maxBufferLength: 15,               // บัฟเฟอร์ล่วงหน้าปกติ ~15 วิ (ค่า default คือ 30)
+  maxMaxBufferLength: 30,            // เพดานบัฟเฟอร์สูงสุดตอนเน็ตดี ~30 วิ (ค่า default คือ 600!)
+  maxBufferSize: 30 * 1000 * 1000,   // จำกัดบัฟเฟอร์ ~30MB (ค่า default คือ 60MB)
+  backBufferLength: 10,              // ล้างส่วนที่เล่นผ่านไปแล้วออกจากหน่วยความจำ ไม่ให้ค้างสะสม
+  enableWorker: true                 // ประมวลผลนอก main thread กันหน้าเว็บค้างขณะเล่น
+};
+
+// สร้าง instance ของ hls.js พร้อมผูก error handler ไว้ในตัวเดียว เรียกซ้ำได้ปลอดภัย
+// (ของเดิมตอน error ประเภทอื่นๆ ที่ไม่ใช่ NETWORK/MEDIA จะสร้าง instance ใหม่แต่ลืมผูก
+// error handler ซ้ำ ทำให้หลังจากนั้นถ้า error อีกครั้งจะไม่มีใครดักจับ/กู้คืนให้)
+function createHlsInstance(src) {
+  const instance = new Hls(hlsConfig);
+  instance.loadSource(src);
+  instance.attachMedia(video);
+
+  // ดักจับ error แล้วพยายามกู้คืนแทนที่จะปล่อยให้วิดีโอหยุด/รีเซ็ต
+  // (การที่วิดีโอหยุดกะทันหันจาก error บางทีทำให้ระบบเบราว์เซอร์ยกเลิกเต็มจอไปด้วย)
+  instance.on(Hls.Events.ERROR, function (event, data) {
+    if (!data.fatal) return;
+    switch (data.type) {
+      case Hls.ErrorTypes.NETWORK_ERROR:
+        instance.startLoad();
+        break;
+      case Hls.ErrorTypes.MEDIA_ERROR:
+        instance.recoverMediaError();
+        break;
+      default:
+        instance.destroy();
+        if (hlsInstance === instance) {
+          hlsInstance = createHlsInstance(src);
+        }
+        break;
+    }
+  });
+
+  return instance;
 }
 
 function playThumbnail(thumb) {
@@ -467,29 +516,7 @@ function playThumbnail(thumb) {
   }
 
   if (Hls.isSupported()) {
-    hlsInstance = new Hls();
-    hlsInstance.loadSource(src);
-    hlsInstance.attachMedia(video);
-
-    // ดักจับ error แล้วพยายามกู้คืนแทนที่จะปล่อยให้วิดีโอหยุด/รีเซ็ต
-    // (การที่วิดีโอหยุดกะทันหันจาก error บางทีทำให้ระบบเบราว์เซอร์ยกเลิกเต็มจอไปด้วย)
-    hlsInstance.on(Hls.Events.ERROR, function (event, data) {
-      if (!data.fatal) return;
-      switch (data.type) {
-        case Hls.ErrorTypes.NETWORK_ERROR:
-          hlsInstance.startLoad();
-          break;
-        case Hls.ErrorTypes.MEDIA_ERROR:
-          hlsInstance.recoverMediaError();
-          break;
-        default:
-          hlsInstance.destroy();
-          hlsInstance = new Hls();
-          hlsInstance.loadSource(src);
-          hlsInstance.attachMedia(video);
-          break;
-      }
-    });
+    hlsInstance = createHlsInstance(src);
   } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
     video.src = src;
   }
@@ -682,12 +709,9 @@ document.getElementById('forwardBtn').addEventListener('click', () => {
   
 </script>
 
-  
-</body>
+<p style="text-align:center; color:#888; font-size:12px; margin-top:20px;">
+  🎬 จัดทำขึ้นเพื่อความบันเทิงในครอบครัวเท่านั้น ห้ามจำหน่าย By NETI🍿 กลุ่ม Android's Box TV THAI
+</p>
 
-  </div>
-</div>
-  </div>
-</div>
- 🎬 จัดทำขึ้นเพื่อความบันเทิงในครอบครัวเท่านั้น ห้ามจำหน่าย By NETI🍿 กลุ่ม Android's Box TV THAI
+</body>
 </html>
